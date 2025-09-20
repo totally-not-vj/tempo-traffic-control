@@ -22,64 +22,94 @@ interface TrafficData {
   west: number;
   currentGreen: 'north' | 'south' | 'east' | 'west';
   lastUpdated: string;
+  manualOverride: boolean;
+}
+
+interface FlaskApiResponse {
+  counts: {
+    north: number;
+    south: number;
+    east: number;
+    west: number;
+  };
+  signal: 'north' | 'south' | 'east' | 'west';
+  manual_override: boolean;
 }
 
 const TrafficDashboard = () => {
   const [trafficData, setTrafficData] = useState<TrafficData>({
-    north: 12,
-    south: 8,
-    east: 4,
-    west: 6,
+    north: 0,
+    south: 0,
+    east: 0,
+    west: 0,
     currentGreen: 'north',
-    lastUpdated: new Date().toLocaleTimeString()
+    lastUpdated: new Date().toLocaleTimeString(),
+    manualOverride: false
   });
 
   const [isLive, setIsLive] = useState(true);
-  const [manualMode, setManualMode] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [flaskBackendUrl] = useState('http://127.0.0.1:5000');
 
-  // Simulate live data updates
+  // Fetch real data from Flask backend
   useEffect(() => {
     if (!isLive) return;
 
-    const interval = setInterval(() => {
-      setTrafficData(prev => ({
-        ...prev,
-        north: Math.floor(Math.random() * 20) + 5,
-        south: Math.floor(Math.random() * 15) + 3,
-        east: Math.floor(Math.random() * 12) + 2,
-        west: Math.floor(Math.random() * 18) + 4,
-        lastUpdated: new Date().toLocaleTimeString()
-      }));
-    }, 2000);
+    const fetchTrafficData = async () => {
+      try {
+        const response = await fetch(`${flaskBackendUrl}/get_counts`);
+        const data: FlaskApiResponse = await response.json();
+        
+        setTrafficData(prev => ({
+          ...prev,
+          north: data.counts.north,
+          south: data.counts.south,
+          east: data.counts.east,
+          west: data.counts.west,
+          currentGreen: data.signal,
+          manualOverride: data.manual_override,
+          lastUpdated: new Date().toLocaleTimeString()
+        }));
+        
+        setIsConnected(true);
+      } catch (error) {
+        console.error('Failed to fetch traffic data:', error);
+        setIsConnected(false);
+        // Fallback to simulation if backend is unavailable
+        setTrafficData(prev => ({
+          ...prev,
+          north: Math.floor(Math.random() * 20) + 5,
+          south: Math.floor(Math.random() * 15) + 3,
+          east: Math.floor(Math.random() * 12) + 2,
+          west: Math.floor(Math.random() * 18) + 4,
+          lastUpdated: new Date().toLocaleTimeString()
+        }));
+      }
+    };
+
+    const interval = setInterval(fetchTrafficData, 500);
+    fetchTrafficData(); // Initial fetch
 
     return () => clearInterval(interval);
-  }, [isLive]);
+  }, [isLive, flaskBackendUrl]);
 
-  // Auto signal rotation (if not in manual mode)
-  useEffect(() => {
-    if (manualMode) return;
-
-    const signalInterval = setInterval(() => {
-      setTrafficData(prev => {
-        const directions: Array<'north' | 'south' | 'east' | 'west'> = ['north', 'south', 'east', 'west'];
-        const currentIndex = directions.indexOf(prev.currentGreen);
-        const nextIndex = (currentIndex + 1) % directions.length;
-        return {
-          ...prev,
-          currentGreen: directions[nextIndex]
-        };
-      });
-    }, 8000);
-
-    return () => clearInterval(signalInterval);
-  }, [manualMode]);
-
-  const handleManualOverride = (direction: 'north' | 'south' | 'east' | 'west') => {
-    setTrafficData(prev => ({
-      ...prev,
-      currentGreen: direction
-    }));
+  // Manual override functions
+  const handleManualOverride = async (direction: 'north' | 'south' | 'east' | 'west') => {
+    try {
+      await fetch(`${flaskBackendUrl}/set_signal/${direction}`);
+    } catch (error) {
+      console.error('Failed to set signal:', error);
+    }
   };
+
+  const handleEndOverride = async () => {
+    try {
+      await fetch(`${flaskBackendUrl}/end_override`);
+    } catch (error) {
+      console.error('Failed to end override:', error);
+    }
+  };
+
 
   const getDirectionData = (direction: keyof Pick<TrafficData, 'north' | 'south' | 'east' | 'west'>) => {
     const icons = {
@@ -117,13 +147,17 @@ const TrafficDashboard = () => {
           </div>
           
           <div className="flex items-center space-x-3">
-            <Badge variant={isLive ? "default" : "secondary"} className="px-3 py-1">
+            <Badge variant={isLive && isConnected ? "default" : "secondary"} className="px-3 py-1">
               <Radio className="h-3 w-3 mr-1" />
-              {isLive ? "LIVE" : "OFFLINE"}
+              {isLive && isConnected ? "LIVE" : isConnected ? "PAUSED" : "OFFLINE"}
             </Badge>
-            <Badge variant={manualMode ? "destructive" : "outline"}>
+            <Badge variant={trafficData.manualOverride ? "destructive" : "outline"}>
               <Settings className="h-3 w-3 mr-1" />
-              {manualMode ? "MANUAL" : "AUTO"}
+              {trafficData.manualOverride ? "MANUAL" : "AUTO"}
+            </Badge>
+            <Badge variant={isConnected ? "default" : "destructive"}>
+              <Zap className="h-3 w-3 mr-1" />
+              {isConnected ? "BACKEND CONNECTED" : "BACKEND OFFLINE"}
             </Badge>
           </div>
         </div>
@@ -310,11 +344,12 @@ const TrafficDashboard = () => {
               <CardContent className="space-y-4">
                 <div className="flex items-center space-x-2">
                   <Button
-                    variant={manualMode ? "destructive" : "outline"}
-                    onClick={() => setManualMode(!manualMode)}
+                    variant={trafficData.manualOverride ? "destructive" : "outline"}
+                    onClick={trafficData.manualOverride ? handleEndOverride : () => {}}
                     className="flex-1"
+                    disabled={!isConnected}
                   >
-                    {manualMode ? "Exit Manual" : "Manual Mode"}
+                    {trafficData.manualOverride ? "End Manual Override" : "Auto Mode Active"}
                   </Button>
                 </div>
 
@@ -325,7 +360,7 @@ const TrafficDashboard = () => {
                       variant={trafficData.currentGreen === 'north' ? "default" : "outline"}
                       size="sm"
                       onClick={() => handleManualOverride('north')}
-                      disabled={!manualMode}
+                      disabled={!isConnected}
                     >
                       <ArrowUp className="h-4 w-4 mr-1" />
                       North
@@ -334,7 +369,7 @@ const TrafficDashboard = () => {
                       variant={trafficData.currentGreen === 'south' ? "default" : "outline"}
                       size="sm"
                       onClick={() => handleManualOverride('south')}
-                      disabled={!manualMode}
+                      disabled={!isConnected}
                     >
                       <ArrowDown className="h-4 w-4 mr-1" />
                       South
@@ -343,7 +378,7 @@ const TrafficDashboard = () => {
                       variant={trafficData.currentGreen === 'east' ? "default" : "outline"}
                       size="sm"
                       onClick={() => handleManualOverride('east')}
-                      disabled={!manualMode}
+                      disabled={!isConnected}
                     >
                       <ArrowRight className="h-4 w-4 mr-1" />
                       East
@@ -352,7 +387,7 @@ const TrafficDashboard = () => {
                       variant={trafficData.currentGreen === 'west' ? "default" : "outline"}
                       size="sm"
                       onClick={() => handleManualOverride('west')}
-                      disabled={!manualMode}
+                      disabled={!isConnected}
                     >
                       <ArrowLeft className="h-4 w-4 mr-1" />
                       West
@@ -386,20 +421,24 @@ const TrafficDashboard = () => {
               <CardContent>
                 <div className="space-y-3">
                   <div className="flex items-center space-x-2 text-sm">
-                    <div className="w-2 h-2 bg-traffic-green rounded-full" />
-                    <span>AI Detection: Active</span>
+                    <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-traffic-green' : 'bg-traffic-red'}`} />
+                    <span>AI Detection: {isConnected ? 'Active' : 'Offline'}</span>
                   </div>
                   <div className="flex items-center space-x-2 text-sm">
-                    <div className="w-2 h-2 bg-traffic-green rounded-full" />
-                    <span>Signal Controller: Online</span>
+                    <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-traffic-green' : 'bg-traffic-red'}`} />
+                    <span>Signal Controller: {isConnected ? 'Online' : 'Offline'}</span>
+                  </div>
+                  <div className="flex items-center space-x-2 text-sm">
+                    <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-traffic-green' : 'bg-traffic-red'}`} />
+                    <span>Flask Backend: {isConnected ? 'Connected' : 'Disconnected'}</span>
+                  </div>
+                  <div className="flex items-center space-x-2 text-sm">
+                    <div className={`w-2 h-2 rounded-full ${trafficData.manualOverride ? 'bg-warning' : 'bg-traffic-green'}`} />
+                    <span>Mode: {trafficData.manualOverride ? 'Manual Override' : 'AI Controlled'}</span>
                   </div>
                   <div className="flex items-center space-x-2 text-sm">
                     <div className="w-2 h-2 bg-primary rounded-full" />
-                    <span>Backend API: Connected</span>
-                  </div>
-                  <div className="flex items-center space-x-2 text-sm">
-                    <div className="w-2 h-2 bg-warning rounded-full" />
-                    <span>Average Wait: 2.3 min</span>
+                    <span>Total Vehicles: {getTotalVehicles()}</span>
                   </div>
                 </div>
               </CardContent>
