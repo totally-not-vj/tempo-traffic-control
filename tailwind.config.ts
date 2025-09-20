@@ -47,6 +47,18 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        // Traffic System Colors
+        traffic: {
+          red: "hsl(var(--traffic-red))",
+          yellow: "hsl(var(--traffic-yellow))",
+          green: "hsl(var(--traffic-green))",
+        },
+        success: "hsl(var(--success))",
+        warning: "hsl(var(--warning))",
+        dashboard: {
+          bg: "hsl(var(--dashboard-bg))",
+          control: "hsl(var(--control-panel))",
+        },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
           foreground: "hsl(var(--sidebar-foreground))",
